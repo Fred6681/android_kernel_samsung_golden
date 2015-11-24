@@ -2136,8 +2136,8 @@ int mxt_usb_switch_notify(struct notifier_block *nb, unsigned long val,
 				data->dev_mode = TA_MODE;
 				break;
 			default:
-				dev_err(&client->dev, "%s: no mode (%d) change"
-					" (0x%lx)\n", __func__, val);
+				dev_err(&client->dev, "%s: no mode (%ld) change"
+					" (0x)\n", __func__, val);
 				return 0;
 			}
 		}
