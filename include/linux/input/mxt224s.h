@@ -22,10 +22,11 @@
 #define MXT_1664S_HW_RESET_TIME		300	/* msec */
 #define MXT_1664S_FW_RESET_TIME		500	/* msec */
 
-#define MXT_CONFIG(x, y) {.instance=y,.size=ARRAY_SIZE(x##_config)-1,\
-			  .data=x##_config}
-#define MXT_CONFIG_TA(x, y) {.instance=y,.size=ARRAY_SIZE(x##_config_ta)-1,\
-			     .data=x##_config_ta}
+#define MXT_CONFIG(x, y) {.instance = y, .size = ARRAY_SIZE(x##_config)-1,\
+			  .data = x##_config}
+#define MXT_CONFIG_TA(x, y) {.instance = y, \
+		.size = ARRAY_SIZE(x##_config_ta)-1,\
+		.data = x##_config_ta}
 
 enum {
 	RESERVED_T0 = 0,
