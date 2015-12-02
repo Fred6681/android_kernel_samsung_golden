@@ -14,7 +14,7 @@
  */
 
 #define DEBUG
-//#define VERBOSE_DEBUG
+/*#define VERBOSE_DEBUG*/
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 #define ATMEL_DEBUG
@@ -27,7 +27,7 @@
 #include <linux/cpufreq.h>
 #endif
 
-#define TOUCH_BOOSTER
+/*#define TOUCH_BOOSTER*/
 #define CHECK_ANTITOUCH
 #define SHAPETOUCH
 
@@ -348,13 +348,13 @@ struct mxt_data {
 	struct notifier_block		nb;
 #endif
 	struct timer_list		ta_status_timer;
-
+	
 	u8				max_report_id;
 	u8				finger_report_id;
 	u16				msg_proc;
 	u16				msg_obj_size;
 	u16				cmd_proc;
-
+	
 	u32				x_dropbit:2;
 	u32				y_dropbit:2;
 	u32				finger_mask;
@@ -374,7 +374,7 @@ struct mxt_data {
 #if defined(SHAPETOUCH)
 	u16				sumsize;
 #endif
-
+	
 #if defined(ATMEL_DEBUG)
 	int				driver_paused;
 	int				debug_enabled;
@@ -467,14 +467,18 @@ static struct tsp_cmd tsp_cmds[] = {
 };
 #endif
 
+#if defined(SEC_FAC_TSP)
+struct device *sec_touchscreen_dev;
+#endif
+
 #define READ_FW_FROM_HEADER 1
 static u8 fw_latest[] = {0x11, 0xaa};	/* version, build_version */
 u8 fw_data[] = {
-     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+#if READ_FW_FROM_HEADER
+	#include "mxt224s__APP_v1_1_AA_.h"
+#endif
+  
 };
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void mxt_early_suspend(struct early_suspend *);
 static void mxt_late_resume(struct early_suspend *);
@@ -514,14 +518,14 @@ static int mxt_read_mem(struct mxt_data *data, u16 reg, u8 len, u8 *buf)
 		},
 	};
 	int ret;
-
+	
 	ret = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
 	if (ret != ARRAY_SIZE(msg)) {
 		dev_err(&client->dev, "fail to %s 0x%X[%d] (%d)\n", __func__,
 			le_reg, len, ret);
 		return -EIO;
 	}
-
+	
 	return ret;
 }
 
@@ -530,17 +534,17 @@ static int mxt_write_mem(struct mxt_data *data, u16 reg, u8 len, const u8 *buf)
 	struct i2c_client *client = data->client;
 	u8 tmp[len + 2];
 	int ret;
-
+	
 	put_unaligned_le16(cpu_to_le16(reg), tmp);
 	memcpy(tmp + 2, buf, len);
-
+	
 	ret = i2c_master_send(client, tmp, ARRAY_SIZE(tmp));
 	if (ret != ARRAY_SIZE(tmp)) {
 		dev_err(&client->dev, "fail to %s 0x%X[%d] (%d)\n", __func__,
 			cpu_to_le16(reg), len, ret);
 		return -EIO;
 	}
-
+	
 	return ret;
 }
 
@@ -550,13 +554,13 @@ static int mxt_fw_write(struct mxt_data *data,
 	struct i2c_client *client = data->client;
 	struct i2c_client *client_boot = data->client_boot;
 	int ret;
-
+	
 	ret = i2c_master_send(client_boot, frame_data, frame_size);
 	if (ret != frame_size) {
 		dev_err(&client->dev, "%s: i2c send failed\n", __func__);
 		return -EIO;
 	}
-
+	
 	return 0;
 }
 
@@ -565,24 +569,24 @@ struct mxt_obj *mxt_get_obj(struct mxt_data *data, u8 type)
 	struct i2c_client *client = data->client;
 	struct mxt_obj *obj;
 	int i;
-
+	
 	if (!data->obj_tbl) {
 		dev_err(&client->dev, "no obj table\n");
 		return NULL;
 	}
-
+	
 	if (!data->info.obj_num) {
 		dev_err(&client->dev, "no objcect table entyr\n");
 		return NULL;
 	}
-
+	
 	for (i = 0; i < data->info.obj_num; i++) {
 		obj = data->obj_tbl + i;
 		if (obj->type == type)
 			return obj;
 	}
 	dev_err(&client->dev, "invalid obj type (%d)\n", type);
-
+	
 	return NULL;
 }
 
@@ -590,13 +594,13 @@ int mxt_read_obj(struct mxt_data *data, u8 type, u8 offset, u8 *val)
 {
 	struct mxt_obj *obj;
 	u16 reg;
-
+	
 	obj = mxt_get_obj(data, type);
 	if (!obj)
 		return -EINVAL;
-
+	
 	reg = obj->start_addr;
-
+	
 	return mxt_read_mem(data, reg + offset, 1, val);
 }
 
@@ -605,11 +609,11 @@ static int mxt_write_obj(struct mxt_data *data,
 {
 	struct mxt_obj *obj;
 	u16 reg;
-
+	
 	obj = mxt_get_obj(data, type);
 	if (!obj)
 		return -EINVAL;
-
+	
 	reg = obj->start_addr;
 	return mxt_write_mem(data, reg + offset, 1, &val);
 }
@@ -619,7 +623,7 @@ static int (*mxt_get_handler(struct mxt_data *data, u8 obj_type))
 {
 	struct i2c_client *client = data->client;
 	int i;
-
+	
 	for (i = 0; i < ARRAY_SIZE(msg_handler); i++) {
 		if (obj_type == msg_handler[i].obj_type)
 			return msg_handler[i].handler;
@@ -633,7 +637,7 @@ static int mxt_calibrate_chip(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	int ret;
 	u8 buf = 1;
-
+	
 	/* send calibration command */
 	ret = mxt_write_mem(data, data->cmd_proc + CMD_CALIBRATE_OFFSET, 1,
 			    &buf);
@@ -641,9 +645,9 @@ static int mxt_calibrate_chip(struct mxt_data *data)
 		dev_err(&client->dev, "fail to send calibration cmd\n");
 		return ret;
 	}
-
+	
 	dev_info(&client->dev, "cmd: calibration\n");
-
+	
 	return 0;
 }
 
@@ -654,9 +658,9 @@ static struct mxt_cfg_data *mxt_get_cfg(struct mxt_data *data, u8 type, u8 mode)
 	struct mxt_cfg_data *cfg;
 	u32 offset;
 	int i;
-
+	
 	switch (mode) {
-
+	  
 	case TA_MODE:
 		cfg_image = data->ta_cfg_image;
 		break;
@@ -667,7 +671,7 @@ static struct mxt_cfg_data *mxt_get_cfg(struct mxt_data *data, u8 type, u8 mode)
 		dev_err(&client->dev, "%s: invalid mode (%d)\n", __func__,
 			mode);
 	}
-
+	
 	offset = cfg_image->hdr_len;
 	for (i = 0; i < cfg_image->num_of_cfg; i++) {
 		cfg = (struct mxt_cfg_data *)((u8 *)cfg_image + offset);
@@ -675,7 +679,7 @@ static struct mxt_cfg_data *mxt_get_cfg(struct mxt_data *data, u8 type, u8 mode)
 			return cfg;
 		offset += sizeof(struct mxt_cfg_data) + cfg->size;
 	}
-
+	
 	dev_err(&client->dev, "%s: no cfg type %d on %d\n", __func__, type,
 		 mode);
 	return NULL;
@@ -694,27 +698,27 @@ static int mxt_t61_timer_set(struct mxt_data *data, u8 cmd, u8 mode, u16 period)
 	struct mxt_obj *obj;
 	int ret;
 	u8 buf[] = {3, cmd, mode, period & 0xFF, (period >> 8) & 0xFF};
-
+	
 	print_hex_dump(KERN_INFO, "T61 msg:", DUMP_PREFIX_NONE, 16, 1, buf,
 		       ARRAY_SIZE(buf), false);
-
+	
 	obj = mxt_get_obj(data, SPT_TIMER_T61);
 	if (!obj) {
 		dev_err(&client->dev, "%s: fail to write obj T%d\n",
 			__func__, SPT_TIMER_T61);
 		return -EINVAL;
 	}
-
+	
 	ret = mxt_write_mem(data, obj->start_addr, ARRAY_SIZE(buf), buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "%s: fail to write T%d (%d)\n", __func__,
 			obj->type, ret);
 		return ret;
 	}
-
+	
 	dev_info(&data->client->dev, "%s: timer %sabled %d\n",
 		 __func__, (period > 0) ? "en" : "dis", period);
-
+	
 	return 0;
 }
 
@@ -723,27 +727,27 @@ static int mxt_t8_autocal_set(struct mxt_data *data, u8 time)
 	struct i2c_client *client = data->client;
 	struct mxt_obj *obj;
 	int ret;
-
+	
 	obj = mxt_get_obj(data, GEN_ACQUISITIONCONFIG_T8);
 	if (!obj) {
 		dev_err(&client->dev, "%s: fail to write obj T%d\n",
 			__func__, GEN_ACQUISITIONCONFIG_T8);
 		return -EINVAL;
 	}
-
+	
 	ret = mxt_write_mem(data, obj->start_addr + 4, 1, &time);
 	if (ret < 0) {
 		dev_err(&client->dev, "%s: fail to write T%d (%d)\n", __func__,
 			obj->type, ret);
 		return ret;
 	}
-
+	
 	data->autocal_enabled = (time > 0) ? true : false;
 	dev_info(&client->dev, "autocal %sabled %d\n",
 		 (time > 0) ? "en" : "dis", time);
-
+	
 	return 0;
-
+	
 }
 #endif	/* CHECK_ANTITOUCH */
 
@@ -752,34 +756,34 @@ static int mxt_command_proc_msg_handler(struct mxt_data *data,
 {
 	struct i2c_client *client = data->client;
 	char tag[] = "T6";
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_RESET)
 		dev_info(&client->dev, "%s: reset is on going\n", tag);
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_OFL)
 		dev_err(&client->dev, "%s: overflow detected\n", tag);
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_SIGERR)
 		dev_err(&client->dev, "%s: signal error\n", tag);
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_CAL)
 		dev_info(&client->dev, "%s: calibration is on going\n", tag);
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_CFGERR)
 		dev_err(&client->dev, "%s: config error\n", tag);
-
+	
 	if (msg->data[0] & MXT_CMD_PROC_COMSERR)
 		dev_err(&client->dev, "%s: i2c checksum error\n", tag);
-
+	
 	if (msg->data[0] == 0x00) {
 		dev_info(&client->dev, "%s: normal mode\n", tag);
-#if defined(CHECK_ANTITOUCH)
-                data->check_timer = 0;
-                data->check_antitouch = 0;
-                data->check_after_wakeup = 1;
-#endif /*CHECK_ANTITOUCH*/
-        }
-
+		#if defined(CHECK_ANTITOUCH)
+			data->check_timer = 0;
+			data->check_antitouch = 0;
+			data->check_after_wakeup = 1;
+		#endif /*CHECK_ANTITOUCH*/
+	}
+	
 	return 0;
 }
 
@@ -790,17 +794,17 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 	char tag[] = "T9";
 	int id;
 	u8 status;
-
+	
 	id = msg->report_id - data->finger_report_id;
-
+	
 	/* If not a touch event, return */
 	if (id < 0 || id >= data->num_of_fingers) {
 		dev_err(&client->dev, "%s: invalid finger id %d\n", tag, id);
 		return -EINVAL;
 	}
-
+	
 	status = msg->data[0];
-
+	
 	if (status & MXT_MT_RELEASE) {
 		input_mt_slot(data->input_dev, id);
 		input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER,
@@ -813,13 +817,13 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 #endif
 		data->finger[id].x = 0;
 		data->finger[id].y = 0;
-
+		
 		if (data->finger[id].state) {
-			if(*data->finger_cnt > 0)
+			if (*data->finger_cnt > 0)
 				(*data->finger_cnt)--;
 		}
 		data->finger[id].state = 0;
-
+		
 #if defined(TOUCH_BOOSTER)
 		if (*data->finger_cnt == 0) {
 			prcmu_qos_update_requirement(PRCMU_QOS_APE_OPP,
@@ -837,7 +841,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 	} else if ((status & MXT_MT_DETECT) &&
 			(status & (MXT_MT_PRESS | MXT_MT_MOVE))) {
 		int x, y, w, z;
-
+	
 #if defined(SHAPETOUCH)
 		int c;
 #endif
@@ -847,15 +851,15 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 		    data->y_dropbit;
 		w = msg->data[4];
 		z = msg->data[5];
-
+		
 #if defined(SHAPETOUCH)
 		c = msg->data[6];
 #endif
-
+		
 #if !defined(VERBOSE_DEBUG)
 		if (status & MXT_MT_PRESS) {
 #endif
-
+		  
 #if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 			dev_info(&client->dev, "%4s[%d]:\n", "down", id);
 #elif defined(SHAPETOUCH)
@@ -865,7 +869,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 			dev_info(&client->dev, "%4s[%d]: %3d, %3d (%3d,%3d)\n",
 				"down", id, x, y, w, z);
 #endif
-
+			
 #if defined(TOUCH_BOOSTER)
 			if (*data->finger_cnt == 0) {
 				prcmu_qos_update_requirement(PRCMU_QOS_APE_OPP,
@@ -883,29 +887,25 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 				(*data->finger_cnt)++;
 			
 			data->finger[id].state = 1;
-
+			
 #if defined(CHECK_ANTITOUCH)
 			dev_info(&client->dev, "data->finger_cnt = %d\n",
 				*data->finger_cnt);
-			if(data->check_after_wakeup)
-                        {
-                                if(*data->finger_cnt > 1)
-                                {
-                                        dev_info(&client->dev, "data->check_after_wakeup!!!!!!!!!!!!!!\r\n");
-                                        mxt_calibrate_chip(data);
-                                        mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
-                                                          MXT_T61_TIMER_ONESHOT, 2000);
-
-                                        data->check_after_wakeup = 0;
-                                }
-                                else
-                                {
-                                        mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
-                                                          MXT_T61_TIMER_ONESHOT,800);
-                                        data->check_after_wakeup = 2;
-                                }
-                        }
-
+			if (data->check_after_wakeup) {
+				if (*data->finger_cnt > 1) {
+					dev_info(&client->dev, "data->check_after_wakeup!!!!!!!!!!!!!!\r\n");
+					mxt_calibrate_chip(data);
+					mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
+						MXT_T61_TIMER_ONESHOT, 2000);
+					
+					data->check_after_wakeup = 0;
+				} else {
+					mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
+						MXT_T61_TIMER_ONESHOT, 800);
+					data->check_after_wakeup = 2;
+				}
+			}
+			
 #endif
 #if !defined(VERBOSE_DEBUG)
 		}
@@ -913,7 +913,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 
 		data->finger[id].x = x;
 		data->finger[id].y = y;
-
+		
 		input_mt_slot(data->input_dev, id);
 		input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER,
 						true);
@@ -925,7 +925,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 		input_report_abs(data->input_dev, ABS_MT_COMPONENT, c);
 		input_report_abs(data->input_dev, ABS_MT_SUMSIZE, data->sumsize);
 #endif
-
+		
 	} else if (status & MXT_MT_SUPPRESS) {
 		int mt_val;
 		input_mt_slot(data->input_dev, id);
@@ -946,7 +946,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 		/* ignore changed amplitude and vector messsage */
 		if (!((status & MXT_MT_DETECT) &&
 			(status & MXT_MT_VECTOR || status & MXT_MT_AMP))) {
-
+		  
 			dev_err(&client->dev, "unknown state: %d, 0x%x\n",
 				id, status);
 		}
@@ -956,7 +956,7 @@ static int mxt_multi_touchscreen_msg_handler(struct mxt_data *data,
 	if (likely(!data->driver_paused))
 #endif
 		input_sync(data->input_dev);
-
+		
 out:
 	return 0;
 }
@@ -966,23 +966,21 @@ static int mxt_touch_suppression_msg_handler(struct mxt_data *data,
 {
 	struct i2c_client *client = data->client;
 	char tag[] = "T42";
-
+	
 	if (msg->data[0] & 0x01) {
 		dev_info(&client->dev, "%s: palm touch detected\n", tag);
 #if defined(CHECK_ANTITOUCH)
-                if (data->check_after_wakeup) {
-                        dev_info(&client->dev, "PALM data->check_after_wakeup PALM  \n");
-
-                        mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
-                                          MXT_T61_TIMER_ONESHOT, 2000);
-                        mxt_calibrate_chip(data);
-                        data->check_after_wakeup = 0;
-                }
-#endif
+	if (data->check_after_wakeup) {
+		dev_info(&client->dev, "PALM data->check_after_wakeup PALM  \n");
+		mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
+			MXT_T61_TIMER_ONESHOT, 2000);
+		mxt_calibrate_chip(data);
+		data->check_after_wakeup = 0;
 	}
-	else
+#endif
+	} else
 		dev_info(&client->dev, "%s: palm touch released\n", tag);
-
+	
 	return 0;
 }
 
@@ -992,32 +990,31 @@ static int mxt_extra_touchscreen_msg_handler(struct mxt_data *data,
 	struct i2c_client *client = data->client;
 	char tag[] = "T57";
 	u16 tch_area, atch_area;
-
+	
 #if defined(SHAPETOUCH)
 	data->sumsize = (msg->data[1] << 8) | msg->data[0];
 #endif
-
+	
 #if defined(CHECK_ANTITOUCH)
 	tch_area = (msg->data[3] << 8) | msg->data[2];
 	atch_area = (msg->data[5] << 8) | msg->data[4];
-
+	
 	if (atch_area)
 		dev_info(&client->dev, "%s: tch=%d, atch=%d\n", tag,
 			tch_area, atch_area);
-
-        if (atch_area > 1 && data->check_antitouch == 0) {
+		
+	if (atch_area > 1 && data->check_antitouch == 0) {
 		mxt_t8_autocal_set(data, 3);
 		data->check_antitouch = 1;
 		mxt_t61_timer_set(data, MXT_T61_TIMER_CMD_START,
 				  MXT_T61_TIMER_ONESHOT, 1200);
-        }
-        if((tch_area == 0) && (atch_area == 0) && (*data->finger_cnt > 0)&&(data->check_after_wakeup))
-        {
-                dev_info(&client->dev, "tch_area==%d, atch_area==%d  !!!!!!\n", tch_area, atch_area);
-                mxt_calibrate_chip(data);
-                data->check_after_wakeup = 0;
-        }
-
+	}
+	if ((tch_area == 0) && (atch_area == 0) && (*data->finger_cnt > 0) && (data->check_after_wakeup)) {
+		dev_info(&client->dev, "tch_area==%d, atch_area==%d  !!!!!!\n", tch_area, atch_area);
+		mxt_calibrate_chip(data);
+		data->check_after_wakeup = 0;
+	}
+	
 #else
 	print_hex_dump(KERN_INFO, "T57 msg:", DUMP_PREFIX_NONE, 16, 1, &msg,
 		       sizeof(struct mxt_message), false);
@@ -1030,19 +1027,19 @@ static int mxt_timer_msg_handler(struct mxt_data *data,
 {
 	struct i2c_client *client = data->client;
 	char tag[] = "T61";
-
+	
 #if defined(CHECK_ANTITOUCH)
 	dev_info(&client->dev, "%s: %d: datas: %#x, %#x, %#x\n", tag,
 		 data->check_antitouch, msg->data[0], msg->data[1],
 		 msg->data[2]);
-
+	
 	if ((msg->data[0] & 0xa0) == 0xa0) {
 		data->check_antitouch = 0;
 		data->check_timer = 0;
 		mxt_t8_autocal_set(data, 0);
-
-		if(data->check_after_wakeup == 2)
-                        data->check_after_wakeup = 0;
+		
+		if (data->check_after_wakeup == 2)
+			data->check_after_wakeup = 0;
 	}
 #else
 	print_hex_dump(KERN_INFO, "T57 msg:", DUMP_PREFIX_NONE, 16, 1, &msg,
@@ -1071,7 +1068,7 @@ static irqreturn_t mxt_irq_thread(int irq, void *dev_id)
 	struct mxt_message msg;
 	u8 report_id;
 	int ret;
-
+	
 	do {
 		ret = mxt_read_mem(data, data->msg_proc,
 				   sizeof(struct mxt_message), (u8 *)&msg);
@@ -1079,6 +1076,8 @@ static irqreturn_t mxt_irq_thread(int irq, void *dev_id)
 			dev_err(&client->dev, "fail to read msg (%d)\n", ret);
 			goto out;
 		}
+		
+		printk("msg report_id=%d,%d,%d,%d\n", msg.report_id, msg.data[0], msg.data[1], msg.data[2]);
 
 #if defined(ATMEL_DEBUG)
 		if (data->debug_enabled)
@@ -1087,17 +1086,17 @@ static irqreturn_t mxt_irq_thread(int irq, void *dev_id)
 					false);
 #endif
 		report_id = msg.report_id;
-
+		
 		/* ignore invalid interrupt */
 		if (report_id == RESERVED_T0 || report_id == RESERVED_T255)
 			continue;
-
+		
 		if (report_id < 1 || report_id > data->max_report_id) {
 			dev_err(&client->dev, "invalid report id (%d)",
 				report_id);
 			goto out;
 		}
-
+		
 		if (!data->rid_map[report_id].handler) {
 			dev_err(&client->dev, "no hander for type %d (id=%d)",
 				data->rid_map[report_id].obj_type, report_id);
@@ -1108,9 +1107,9 @@ static irqreturn_t mxt_irq_thread(int irq, void *dev_id)
 		}
 		if (data->rid_map[report_id].handler)
 			data->rid_map[report_id].handler(data, &msg);
-
+		
 	} while (!gpio_get_value(data->pdata->gpio_read_done));
-
+	
 out:
 	return IRQ_HANDLED;
 }
@@ -1121,23 +1120,23 @@ static int mxt_get_obj_tbl(struct mxt_data *data, u8 force)
 	int ret;
 	int i;
 	u8 type_cnt;
-
+	
 	if (!data->info.obj_num) {
 		dev_err(&client->dev, "cat't get obj table. "
 			"(the number of obj is %d)\n", data->info.obj_num);
 		return -EINVAL;
 	}
-
+	
 	if (force)
 		kfree(data->obj_tbl);
-
+	
 	data->obj_tbl = kzalloc(data->info.obj_num * sizeof(struct mxt_obj),
 				GFP_KERNEL);
 	if (!data->obj_tbl) {
 		dev_err(&client->dev, "failed to allocate mem for obj tbl\n");
 		return -ENOMEM;
 	}
-
+	
 	ret = mxt_read_mem(data, OBJ_TBL_START_ADDR,
 			   data->info.obj_num * sizeof(struct mxt_obj),
 			   (u8 *)data->obj_tbl);
@@ -1145,22 +1144,22 @@ static int mxt_get_obj_tbl(struct mxt_data *data, u8 force)
 		dev_err(&client->dev, "fail to read obj table (%d)\n", ret);
 		goto err;
 	}
-
+	
 	data->max_report_id = 0;
 	type_cnt = 0;
-
+	
 	for (i = 0; i < data->info.obj_num; i++) {
 		data->obj_tbl[i].start_addr =
 			le16_to_cpu(data->obj_tbl[i].start_addr);
-
+			
 		/* size and instance values are smaller than atual value */
 		data->obj_tbl[i].size += 1;
 		data->obj_tbl[i].instances += 1;
 		data->max_report_id += data->obj_tbl[i].num_report_ids *
 				       (data->obj_tbl[i].instances);
-
+				       
 		switch (data->obj_tbl[i].type) {
-
+		  
 		case GEN_MESSAGEPROCESSOR_T5:
 			data->msg_proc = data->obj_tbl[i].start_addr;
 			data->msg_obj_size = data->obj_tbl[i].size;
@@ -1169,11 +1168,11 @@ static int mxt_get_obj_tbl(struct mxt_data *data, u8 force)
 				"%d\n", data->msg_proc, data->msg_obj_size);
 #endif
 			break;
-
+			
 		case GEN_COMMANDPROCESSOR_T6:
 			data->cmd_proc = data->obj_tbl[i].start_addr;
 			break;
-
+			
 		case TOUCH_MULTITOUCHSCREEN_T9:
 			data->finger_report_id = type_cnt + 1;
 #ifdef DEBUG
@@ -1181,19 +1180,19 @@ static int mxt_get_obj_tbl(struct mxt_data *data, u8 force)
 				data->finger_report_id);
 #endif
 			break;
-
+			
 		default:
 			break;
 		}
-
+		
 		if (data->obj_tbl[i].num_report_ids) {
 			type_cnt += data->obj_tbl[i].num_report_ids *
 				    (data->obj_tbl[i].instances);
 		}
 	}
-
+	
 	dev_info(&client->dev, "the number of obj is %d\n", data->info.obj_num);
-
+	
 #ifdef DEBUG
 	dev_info(&client->dev, "the objs in IC.\n");
 	for (i = 0; i < data->info.obj_num; i++) {
@@ -1205,7 +1204,7 @@ static int mxt_get_obj_tbl(struct mxt_data *data, u8 force)
 	}
 #endif
 	return 0;
-
+	
 err:
 	kfree(data->obj_tbl);
 	return ret;
@@ -1216,23 +1215,23 @@ static int mxt_get_rid_map(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	int i, j;
 	int id;
-
+	
 	data->rid_map = kzalloc((data->max_report_id + 1) *
 				sizeof(*data->rid_map),	GFP_KERNEL);
-
+	
 	if (!data->rid_map) {
 		dev_err(&client->dev, "failed to allocate mem for rid\n");
 		return -ENOMEM;
 	}
-
+	
 	data->rid_map[0].instance = 0;
 	data->rid_map[0].obj_type = 0;
 	id = 1;
-
+	
 	for (i = 0; i < data->info.obj_num; i++) {
 		if (data->obj_tbl[i].num_report_ids == 0)
 			continue;
-
+		
 		for (j = 1; j <= data->obj_tbl[i].instances; j++) {
 			int sid = id;
 			while (id < (sid + data->obj_tbl[i].num_report_ids)) {
@@ -1261,20 +1260,20 @@ static int mxt_read_info_crc(struct mxt_data *data, u32 *crc_pointer)
 	u16 crc_address;
 	u8 msg[MXT_CHECKSUM_FIELD_SIZE];
 	int ret;
-
+	
 	/* Read Info block CRC address */
 	crc_address = OBJ_TBL_START_ADDR +
 			data->info.obj_num * OBJ_TBL_ELEMENT_SIZE;
-
+			
 	ret = mxt_read_mem(data, crc_address, ARRAY_SIZE(msg), msg);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to read checksum field (%d)\n",
 			ret);
 		return ret;
 	}
-
+	
 	*crc_pointer = msg[0] | (msg[1] << 8) | (msg[2] << 16);
-
+	
 	return 0;
 }
 
@@ -1283,13 +1282,13 @@ static u32 crc24(u32 crc, u8 byte1, u8 byte2)
 	static const u32 crcpoly = 0x80001B;
 	u32 res;
 	u16 data_word;
-
+	
 	data_word = (((u16)byte2) << 8) | byte1;
 	res = (crc << 1) ^ (u32)data_word;
-
+	
 	if (res & 0x1000000)
 		res ^= crcpoly;
-
+	
 	return res;
 }
 
@@ -1302,26 +1301,26 @@ static int mxt_calculate_infoblock_crc(struct mxt_data *data, u32 *crc_pointer)
 	u32 crc = 0;
 	u32 buf_size = OBJ_TBL_START_ADDR +
 		       data->info.obj_num * OBJ_TBL_ELEMENT_SIZE;
-
+		       
 	buf = kzalloc(buf_size, GFP_KERNEL);
 	if (!buf) {
 		dev_err(&client->dev, "failed to allocate mem for infoblock\n");
 		return -ENOMEM;
 	}
-
+	
 	ret = mxt_read_mem(data, 0, buf_size, buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to read infoblock (%d)\n", ret);
 		goto err;
 	}
-
+	
 	for (i = 0; i < buf_size - 1; i += 2)
 		crc = crc24(crc, buf[i], buf[i + 1]);
-
+	
 	*crc_pointer = crc24(crc, buf[i], 0) & 0x00FFFFFF;
-
+	
 	ret = 0;
-
+	
 err:
 	kfree(buf);
 	return ret;
@@ -1333,7 +1332,7 @@ static int mxt_get_bootloader_version(struct mxt_data *data, u8 val)
 	struct i2c_client *client_boot = data->client_boot;
 	u8 buf[3];
 	int ret;
-
+	
 	if (val & MXT_BOOT_EXTENDED_ID) {
 		ret = i2c_master_recv(client_boot, buf, sizeof(buf));
 		if (ret != sizeof(buf)) {
@@ -1356,7 +1355,7 @@ static int mxt_check_bootloader(struct mxt_data *data, unsigned int state)
 	struct i2c_client *client_boot = data->client_boot;
 	int ret;
 	u8 val;
-
+	
 recheck:
 	ret = i2c_master_recv(client_boot, &val, sizeof(val));
 	if (ret != sizeof(val)) {
@@ -1364,7 +1363,7 @@ recheck:
 			ret);
 		return ret;
 	}
-
+	
 	switch (state) {
 	case MXT_WAITING_BOOTLOAD_CMD:
 		ret = mxt_get_bootloader_version(data, val);
@@ -1390,13 +1389,13 @@ recheck:
 	default:
 		return -EINVAL;
 	}
-
+	
 	if (val != state) {
 		dev_err(&client->dev, "invalid bootloader mode (val=0x%x, "
 			"state=0x%x)\n", val, state);
 		return -EINVAL;
 	}
-
+	
 	return 0;
 }
 
@@ -1406,13 +1405,13 @@ static int mxt_unlock_bootloader(struct mxt_data *data)
 	struct i2c_client *client_boot = data->client_boot;
 	u8 buf[] = {MXT_UNLOCK_CMD_LSB, MXT_UNLOCK_CMD_MSB};
 	int ret;
-
+	
 	ret = i2c_master_send(client_boot, buf, ARRAY_SIZE(buf));
 	if (ret != ARRAY_SIZE(buf)) {
 		dev_err(&client->dev, "%s: i2c send failed\n", __func__);
 		return -EIO;
 	}
-
+	
 	return 0;
 }
 
@@ -1420,7 +1419,7 @@ static int mxt_enter_bootloader(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	/* Change to the bootloader mode */
 	ret = mxt_write_obj(data, GEN_COMMANDPROCESSOR_T6, CMD_RESET_OFFSET,
 			    MXT_BOOT_VALUE);
@@ -1430,7 +1429,7 @@ static int mxt_enter_bootloader(struct mxt_data *data)
 		return ret;
 	}
 	msleep(MXT_1664S_SW_RESET_TIME);
-
+	
 	return 0;
 }
 
@@ -1439,12 +1438,12 @@ static int mxt_probe_bootloader(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	struct i2c_client *client_boot = data->client_boot;
 	u8 val;
-
+	
 	if (i2c_master_recv(client_boot, &val, 1) != 1) {
 		dev_err(&client->dev, "%s: i2c recv failed\n", __func__);
 		return -EIO;
 	}
-
+	
 	if (val & (~MXT_BOOT_STATUS_MASK)) {
 		if (val & MXT_APP_CRC_FAIL)
 			dev_err(&client->dev, "Application CRC failure\n");
@@ -1461,7 +1460,7 @@ static int mxt_get_id_info(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	/* Read IC information */
 	ret = mxt_read_mem(data, 0X00, sizeof(struct mxt_info_block),
 				(u8 *)&data->info);
@@ -1469,11 +1468,11 @@ static int mxt_get_id_info(struct mxt_data *data)
 		dev_err(&client->dev, "fail to read ID info (%d)\n", ret);
 		return ret;
 	}
-
+	
 	print_hex_dump(KERN_INFO, "MXT_id info: ", DUMP_PREFIX_OFFSET, 16, 1,
 		       &data->info.family_id, sizeof(struct mxt_info_block),
 		       false);
-
+	
 	return 0;
 }
 
@@ -1481,35 +1480,35 @@ static int load_fw_in_built_in(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	ret = 0;
 	dev_info(&client->dev, "%s\n", __func__);
-
+	
 	return ret;
 }
 
 static int load_fw_in_header(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
-
+	
 	if (ARRAY_SIZE(fw_data) == 0) {
 		dev_err(&client->dev, "no fw in header\n");
 		return -EINVAL;
 	}
 	dev_info(&client->dev, "fw size in header is %d\n",
 		ARRAY_SIZE(fw_data));
-
+	
 	data->fw_image = kzalloc(ARRAY_SIZE(fw_data), GFP_KERNEL);
 	if (!data->fw_image) {
 		dev_err(&client->dev, "fail to alloc mem for fw image\n");
 		return -ENOMEM;
 	}
-
+	
 	memcpy(data->fw_image, fw_data, ARRAY_SIZE(fw_data));
-
+	
 	data->fw_image->hdr_len = sizeof(struct mxt_fw_image);
 	data->fw_image->fw_len = ARRAY_SIZE(fw_data) - data->fw_image->hdr_len;
-
+	
 #ifdef DEBUG
 	dev_err(&client->dev, "fw_image header info: "
 		"0x%X:0x%X:0x%X:0x%X:0x%X:0x%X:0x%X\n",
@@ -1517,14 +1516,14 @@ static int load_fw_in_header(struct mxt_data *data)
 		data->fw_image->cfg_len, data->fw_image->fw_len,
 		data->fw_image->cfg_crc, data->fw_image->fw_ver,
 		data->fw_image->build_ver);
-
+	
 	dev_err(&client->dev, "fw_image word data: 0x%X:0x%X:0x%X:0x%X\n",
 		data->fw_image->data[0], data->fw_image->data[1],
 		data->fw_image->data[2], data->fw_image->data[3]);
 #endif
-
+	
 	dev_info(&client->dev, "fw in header is successfully loaded\n");
-
+	
 	return 0;
 }
 
@@ -1532,10 +1531,10 @@ static int load_fw_in_fs(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	ret = 0;
 	dev_info(&client->dev, "%s\n", __func__);
-
+	
 	return ret;
 }
 
@@ -1543,7 +1542,7 @@ static int mxt_load_fw(struct mxt_data *data, u8 in)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	switch (in) {
 	case IN_BUILT_IN:
 		ret = load_fw_in_built_in(data);
@@ -1572,7 +1571,7 @@ static int mxt_flash_fw(struct mxt_data *data)
 	unsigned int frame_size;
 	unsigned int pos;
 	int ret;
-
+	
 	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD);
 	if (ret < 0) {
 		/*may still be unlocked from previous update attempt */
@@ -1601,16 +1600,16 @@ static int mxt_flash_fw(struct mxt_data *data)
 				ret);
 			return ret;
 		}
-
+		
 		frame_size = ((*(data->fw_image->data + pos) << 8) |
 			      *(data->fw_image->data + pos + 1));
-
+		
 		/*
 		* We should add 2 at frame size as the the firmware data is not
 		* included the CRC bytes.
 		*/
 		frame_size += 2;
-
+		
 		/* Write one frame to device */
 		ret = mxt_fw_write(data, data->fw_image->data + pos,
 				   frame_size);
@@ -1619,25 +1618,25 @@ static int mxt_flash_fw(struct mxt_data *data)
 				"\n", ret);
 			return ret;
 		}
-
+		
 		ret = mxt_check_bootloader(data, MXT_FRAME_CRC_PASS);
 		if (ret < 0) {
 			dev_err(&client->dev, "fail to check bootloader dufing "
 				"fw flashing, frame_crc state (%d)\n", ret);
 			return ret;
 		}
-
+		
 		pos += frame_size;
-
+		
 		dev_info(&client->dev, "fw is updated %d bytes(/%d bytes)\n",
 				pos, data->fw_image->fw_len);
-
+		
 		msleep(20);
 	}
-
+	
 	msleep(MXT_1664S_FW_RESET_TIME);
 	dev_info(&client->dev, "Sucess updating firmware\n");
-
+	
 	return 0;
 }
 
@@ -1645,10 +1644,10 @@ static int load_config_in_built_in(struct mxt_data *data, u8 type)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	ret = 0;
 	dev_info(&client->dev, "%s\n", __func__);
-
+	
 	return ret;
 }
 
@@ -1664,7 +1663,7 @@ static int load_config_in_board(struct mxt_data *data, u8 type)
 	u32 offset;
 	u32 max_cfg_len;
 	u32 size;
-
+	
 	switch (type) {
 	case NORMAL_CFG:
 		cur_cfg = data->pdata->config;
@@ -1676,62 +1675,62 @@ static int load_config_in_board(struct mxt_data *data, u8 type)
 		dev_err(&client->dev, "invalid config type %d\n", type);
 		return -EINVAL;
 	}
-
+	
 	dev_info(&client->dev, "loading %s config data from board\n",
 		(type) ? "ta" : "normal");
-
+	
 	cfg_len = 0;
 	max_cfg_len = 0;
-
+	
 	for (i = 0; cur_cfg[i].data[0] != RESERVED_T255; i++) {
 		size = sizeof(struct mxt_cfg_data) + cur_cfg[i].size;
 		cfg_len += size;
 		max_cfg_len = (max_cfg_len < size) ? size : max_cfg_len;
 	}
-
+	
 	cur_cfg_image = kzalloc(sizeof(struct mxt_cfg_image) + cfg_len,
 				GFP_KERNEL);
 	if (!cur_cfg_image) {
 		dev_err(&client->dev, "fail to alloc mem for cfg image\n");
 		return -ENOMEM;
 	}
-
+	
 	cfg = kzalloc(max_cfg_len, GFP_KERNEL);
 	if (!cfg) {
 		dev_err(&client->dev, "fail to alloc mem for cfg buf\n");
 		ret = -ENOMEM;
 		goto err_alloc_cfg;
 	}
-
+	
 	cur_cfg_image->hdr_len = sizeof(struct mxt_cfg_image);
 	cur_cfg_image->num_of_cfg = i;
 	cur_cfg_image->cfg_len = cfg_len;
 	cur_cfg_image->cfg_crc = 0;
-
+	
 	dev_info(&client->dev, "loaded config info: hdr_len=%d, num_of_cfg=%d,"
 		" cfg_len=%d, cfg_crc=%d\n", cur_cfg_image->hdr_len,
 		cur_cfg_image->num_of_cfg, cur_cfg_image->cfg_len,
 		cur_cfg_image->cfg_crc);
-
+	
 	offset = cur_cfg_image->hdr_len;
 	for (i = 0; i < cur_cfg_image->num_of_cfg; i++) {
 		cfg->type = cur_cfg[i].data[0];
 		cfg->instance = cur_cfg[i].instance;
 		cfg->size = cur_cfg[i].size;
-
+		
 		memcpy(cfg->data, &cur_cfg[i].data[1], cfg->size);
 		memcpy((struct mxt_cfg_image *)((u8 *)cur_cfg_image + offset),
 			cfg, sizeof(struct mxt_cfg_data) + cfg->size);
-
+		
 		offset += sizeof(struct mxt_cfg_data) + cfg->size;
 	}
 	kfree(cfg);
-
+	
 #ifdef VERBOSE_DEBUG
 	offset = cur_cfg_image->hdr_len;
 	for (i = 0; i < cur_cfg_image->num_of_cfg; i++) {
 		cfg = (struct mxt_cfg_data *)((u8 *)cur_cfg_image + offset);
-
+		
 		print_hex_dump(KERN_INFO, "MXT cfg: ", DUMP_PREFIX_OFFSET, 16,
 			       1, cfg, sizeof(struct mxt_cfg_data) + cfg->size,
 			       false);
@@ -1743,12 +1742,12 @@ static int load_config_in_board(struct mxt_data *data, u8 type)
 		data->cfg_image = cur_cfg_image;
 	else if (type == TA_CFG)
 		data->ta_cfg_image = cur_cfg_image;
-
+	
 	dev_info(&client->dev, "%s config data in board file is successfully"
 		"loaded.\n", (type) ? "ta" : "normal");
-
+	
 	return 0;
-
+	
 err_alloc_cfg:
 	kfree(cur_cfg_image);
 	cur_cfg_image = NULL;
@@ -1759,10 +1758,10 @@ static int load_config_in_fs(struct mxt_data *data, u8 type)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	ret = 0;
 	dev_info(&client->dev, "%s\n", __func__);
-
+	
 	return ret;
 }
 
@@ -1770,7 +1769,7 @@ static int mxt_load_general_config(struct mxt_data *data, u8 in)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	/* load general config */
 	switch (in) {
 	case IN_BUILT_IN:
@@ -1792,7 +1791,7 @@ static int mxt_load_general_config(struct mxt_data *data, u8 in)
 			in, ret);
 		return ret;
 	}
-
+	
 	return 0;
 }
 
@@ -1800,7 +1799,7 @@ static int mxt_load_ta_config(struct mxt_data *data, u8 in)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	/* load ta mode config */
 	switch (in) {
 	case IN_BUILT_IN:
@@ -1822,7 +1821,7 @@ static int mxt_load_ta_config(struct mxt_data *data, u8 in)
 			in, ret);
 		return ret;
 	}
-
+	
 	return 0;
 }
 
@@ -1836,12 +1835,12 @@ static int mxt_write_config(struct mxt_data *data)
 	u16 addr;
 	u8 val;
 	int i;
-
+	
 	val = 0;
-
+	
 	/* Write config info */
 	for (index = 0; index < data->cfg_image->cfg_len;) {
-
+	  
 		if (index + sizeof(struct mxt_cfg_data) >=
 			data->cfg_image->cfg_len) {
 			dev_err(&client->dev, "index(%d) of cfg_data exceeded "
@@ -1850,32 +1849,32 @@ static int mxt_write_config(struct mxt_data *data)
 				data->cfg_image->cfg_len);
 			return -EINVAL;
 		}
-
+		
 		/* Get the info about each obj */
 		cfg = (struct mxt_cfg_data *)(&data->cfg_image->data[index]);
-
+		
 #ifdef VERBOSE_DEBUG
 		print_hex_dump(KERN_ERR, "MXT cfg: ", DUMP_PREFIX_OFFSET, 32, 1,
 			       cfg, sizeof(struct mxt_cfg_data) + cfg->size,
 			       false);
 #endif
-
+		
 		index += sizeof(struct mxt_cfg_data) + cfg->size;
-
+		
 		if (index > data->cfg_image->cfg_len) {
 			dev_err(&client->dev, "index(%d) of cfg exceeded "
 				"total size(%d) in T%d obj!!\n", index,
 				data->cfg_image->cfg_len, cfg->type);
 			return -EINVAL;
 		}
-
+		
 		obj = mxt_get_obj(data, cfg->type);
 		if (!obj) {
 			dev_err(&client->dev, "T%d is invalid obj type\n",
 				cfg->type);
 			return -EINVAL;
 		}
-
+		
 		/* Check and compare the size, instance of each obj */
 		if (cfg->size > obj->size) {
 			dev_err(&client->dev, "T%d obj length exceeded "
@@ -1883,20 +1882,20 @@ static int mxt_write_config(struct mxt_data *data)
 				obj->size);
 			return -EINVAL;
 		}
-
+		
 		if (cfg->instance >= obj->instances) {
 			dev_err(&client->dev, "T%d obj instances exceeded "
 				"(%d, %d)\n", cfg->type, cfg->instance,
 				obj->instances);
 			return -EINVAL;
 		}
-
+		
 		dev_dbg(&client->dev, "writing config for obj_T%d len=%d "
 			"instance=%d (%d/%d)\n", cfg->type, obj->size,
 			cfg->instance, index, data->cfg_image->cfg_len);
-
+		
 		addr = obj->start_addr + obj->size * cfg->instance;
-
+		
 		/* Write register values of each obj */
 		ret = mxt_write_mem(data, addr, cfg->size, cfg->data);
 		if (ret < 0) {
@@ -1904,7 +1903,7 @@ static int mxt_write_config(struct mxt_data *data)
 				__func__, obj->type, ret);
 			return ret;
 		}
-
+		
 		/*
 		 * If firmware is upgraded, new bytes may be added to end of
 		 * objects. It is generally forward compatible to zero these
@@ -1912,21 +1911,21 @@ static int mxt_write_config(struct mxt_data *data)
 		 * this does invalidate the CRC and will force a config
 		 * download every time until the configuration is updated.
 		 */
-
+		
 		if (cfg->size < obj->size) {
 			dev_err(&client->dev, "warn: zeroing %d byte(s) in "
 				"T%d\n", obj->size - cfg->size, cfg->type);
-
+			
 			for (i = cfg->size + 1; i < obj->size; i++) {
 				ret = mxt_write_mem(data, addr + i, 1, &val);
 				if (ret < 0)
 					return ret;
 			}
 		}
-
+		
 	}
 	dev_info(&client->dev, "the config data is successfully writed.\n");
-
+	
 	return 0;
 }
 
@@ -1934,9 +1933,9 @@ static int mxt_set_drop_bit(struct mxt_data *data)
 {
 	struct mxt_cfg_data *cfg;
 	int index;
-
+	
 	for (index = 0; index < data->cfg_image->cfg_len;) {
-
+	  
 		/* Get the info about each obj */
 		cfg = (struct mxt_cfg_data *)(&data->cfg_image->data[index]);
 		if (cfg->type == TOUCH_MULTITOUCHSCREEN_T9) {
@@ -1960,15 +1959,15 @@ static int mxt_backup(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	int ret;
 	u8 buf = MXT_BACKUP_VALUE;
-
+	
 	ret = mxt_write_mem(data, data->cmd_proc + CMD_BACKUP_OFFSET, 1, &buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to send backup cmd\n");
 		return ret;
 	}
-
+	
 	dev_info(&client->dev, "cmd: backup\n");
-
+	
 	return 0;
 }
 
@@ -1977,15 +1976,15 @@ static int mxt_reset(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	int ret;
 	u8 buf = 0xff;
-
+	
 	ret = mxt_write_mem(data, data->cmd_proc + CMD_RESET_OFFSET, 1, &buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to send reset cmd\n");
 		return ret;
 	}
-
+	
 	dev_info(&client->dev, "cmd: reset\n");
-
+	
 	return 0;
 }
 
@@ -1999,26 +1998,26 @@ static int mxt_transit_mode(struct mxt_data *data, u8 mode)
 	int ret;
 	int i;
 	u16 addr;
-
+	
 	switch (mode) {
-
+	  
 	case TA_MODE:
 		ta_cfg_image = data->ta_cfg_image;
-
+		
 		offset = ta_cfg_image->hdr_len;
 		for (i = 0; i < ta_cfg_image->num_of_cfg; i++) {
 			cfg = (struct mxt_cfg_data *)
 			      ((u8 *)ta_cfg_image + offset);
-
+			      
 			obj = mxt_get_obj(data, cfg->type);
 			if (!obj) {
 				dev_err(&client->dev, "%s: T%d is invalid obj "
 					"type\n", __func__, cfg->type);
 				return -EINVAL;
 			}
-
+			
 			addr = obj->start_addr + obj->size * cfg->instance;
-
+			
 			ret = mxt_write_mem(data, addr, cfg->size, cfg->data);
 			if (ret < 0) {
 				dev_err(&client->dev, "%s: fail to write T%d "
@@ -2030,11 +2029,11 @@ static int mxt_transit_mode(struct mxt_data *data, u8 mode)
 		dev_err(&client->dev, "%s: transit to %s mode\n", __func__,
 			"TA");
 		break;
-
+		
 	case NORMAL_MODE:
 		ta_cfg_image = data->ta_cfg_image;
 		cfg_image = data->cfg_image;
-
+		
 		offset = ta_cfg_image->hdr_len;
 		for (i = 0; i < ta_cfg_image->num_of_cfg; i++) {
 			struct mxt_cfg_data *__cfg;
@@ -2046,16 +2045,16 @@ static int mxt_transit_mode(struct mxt_data *data, u8 mode)
 					__func__, cfg->type);
 				return -EINVAL;
 			}
-
+			
 			obj = mxt_get_obj(data, __cfg->type);
 			if (!obj) {
 				dev_err(&client->dev, "%s: T%d is invalid obj "
 					"type\n", __func__, __cfg->type);
 				return -EINVAL;
 			}
-
+			
 			addr = obj->start_addr + obj->size * __cfg->instance;
-
+			
 			ret = mxt_write_mem(data, addr, __cfg->size,
 					    __cfg->data);
 			if (ret < 0) {
@@ -2063,19 +2062,19 @@ static int mxt_transit_mode(struct mxt_data *data, u8 mode)
 					"(%d)\n", __func__, obj->type, ret);
 				return ret;
 			}
-
+			
 			offset += sizeof(struct mxt_cfg_data) + cfg->size;
 		}
 		dev_err(&client->dev, "%s: transit to %s mode\n", __func__,
 			"NORMAL");
 		break;
-
+		
 	default:
 		dev_err(&client->dev, "%s: invalid mode (%d)\n", __func__,
 			mode);
 		return -EINVAL;
 	}
-
+	
 	return 0;
 }
 
@@ -2086,10 +2085,10 @@ static void mxt_mode_transit_worker(struct work_struct *work)
 	int cnt = 0;
 	int ret;
 	u8 mode = data->dev_mode;
-
+	
 	while (!data->enabled) {
 		usleep_range(100000, 200000);
-
+		
 		dev_err(&client->dev, "%s: wiating for device (%d)\n",
 			__func__, cnt++);
 		if (cnt > 30) {
@@ -2098,17 +2097,17 @@ static void mxt_mode_transit_worker(struct work_struct *work)
 			return;
 		}
 	}
-
+	
 	disable_irq(client->irq);
 	ret = mxt_transit_mode(data, mode);
 	enable_irq(client->irq);
-
+	
 	if (ret < 0) {
 		dev_err(&client->dev, "%s: fail to transit %s mode\n",
 		__func__, (mode) ? "TA" : "NORMAL");
 		return;
 	}
-
+	
 	dev_info(&client->dev, "%s: finish mode transit to %s mode\n", __func__,
 		(mode) ? "TA" : "NORMAL");
 }
@@ -2119,23 +2118,23 @@ int mxt_usb_switch_notify(struct notifier_block *nb, unsigned long val,
 {
 	struct mxt_data *data = container_of(nb, struct mxt_data, nb);
 	struct i2c_client *client = data->client;
-
+	
 	data->usb_notify = TRUE;
-
+	
 	if (use_ab8505_iddet) {
-
+	  
 		if (val == USB_LINK_NOT_CONFIGURED_8505) {
-
+		  
 			if (data->dev_mode == NORMAL_MODE) {
 				dev_err(&client->dev, "%s: already NORMAL state"
 					" (0x%lx)\n", __func__, val);
 				goto out;
 			}
-
+			
 			data->dev_mode = NORMAL_MODE;
-
+			
 		} else {
-			switch(val & 0x1F) {
+			switch (val & 0x1F) {
 			case	USB_LINK_STD_HOST_NC_8505:
 			case	USB_LINK_STD_HOST_C_NS_8505:
 			case	USB_LINK_STD_HOST_C_S_8505:
@@ -2149,7 +2148,7 @@ int mxt_usb_switch_notify(struct notifier_block *nb, unsigned long val,
 						val);
 					goto out;
 				}
-
+				
 				data->dev_mode = TA_MODE;
 				break;
 			default:
@@ -2164,32 +2163,32 @@ int mxt_usb_switch_notify(struct notifier_block *nb, unsigned long val,
 		    EXTERNAL_PHONE_POWERED_DEVICE)) && (val &
 		    (USB_SWITCH_CONNECTION_EVENT |
 		    USB_SWITCH_DRIVER_STARTED))) {
-
+		  
 			if (data->dev_mode == TA_MODE) {
 				dev_err(&client->dev, "%s: already TA state "
 					"(0x%lx)\n", __func__, val);
 				goto out;
 			}
-
+			
 			data->dev_mode = TA_MODE;
-
+			
 		} else if (val & USB_SWITCH_DISCONNECTION_EVENT) {
-
+		  
 			if (data->dev_mode == NORMAL_MODE) {
 				dev_err(&client->dev, "%s: already NORMAL state"
 					" (0x%lx)\n", __func__, val);
 				goto out;
 			}
-
+			
 			data->dev_mode = NORMAL_MODE;
-
+			
 		} else {
 			dev_err(&client->dev, "%s: no mode (%d) change (0x%lx)"
 				"\n", __func__, data->dev_mode, val);
 			return 0;
 		}
 	}
-
+	
 	schedule_delayed_work(&data->wq, msecs_to_jiffies(100));
 out:
 	return 0;
@@ -2199,19 +2198,21 @@ out:
 static int mxt_initialize(struct mxt_data *data, bool probe_time)
 {
 	struct i2c_client *client = data->client;
+	u8 dummy_buf[3] = {0,};
 	u32 read_info_crc, calc_info_crc;
+	u16 addr, i;
 	int ret;
-
+	
 	bool fw_empty = false;
-
+	
 	if (!probe_time)
 		goto force_fw_update;
-
+	
 	/* read id informations*/
 	ret = mxt_get_id_info(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to get id info (%d)", ret);
-
+		
 		/* need to check IC is in boot mode */
 		ret = mxt_probe_bootloader(data);
 		if (ret) {
@@ -2219,15 +2220,15 @@ static int mxt_initialize(struct mxt_data *data, bool probe_time)
 				"Failed to verify bootloader's status\n");
 			goto out;
 		}
-
+		
 		dev_info(&client->dev, "firmware flashing from boot-mode\n");
 		fw_empty = true;
 	}
-
+	
 	ret = mxt_get_obj_tbl(data, false);
 	if (ret < 0)
 		dev_err(&client->dev, "fail to get obj tbl (%d)", ret);
-
+	
 force_fw_update:
 /*
 	ret = mxt_load_fw(data, IN_HEADER);
@@ -2235,14 +2236,14 @@ force_fw_update:
 		dev_err(&client->dev, "fail to load fw (%d)", ret);
 		return ret;
 	}
-
+	
 	dev_err(&client->dev, "fw_empty=%d\n", fw_empty);
-
+	
 	if (!probe_time || fw_empty || fw_latest[0] != data->info.ver ||
 	    fw_latest[1] != data->info.build) {
+	    
 */
 	if (0) {
-
 		if (!fw_empty) {
 			ret = mxt_enter_bootloader(data);
 			if (ret < 0) {
@@ -2251,14 +2252,14 @@ force_fw_update:
 				return ret;
 			}
 		}
-
+		
 		ret = mxt_flash_fw(data);
 		if (ret < 0) {
 			dev_err(&client->dev, "fail flash firmware (%d)\n",
 				ret);
 			return ret;
 		}
-
+		
 		ret = mxt_get_id_info(data);
 		if (ret < 0) {
 			dev_err(&client->dev, "fail to get id info (%d)",
@@ -2275,71 +2276,90 @@ force_fw_update:
 			 */
 		}
 	}
-
+	
 	ret = mxt_get_rid_map(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to get rid map (%d)", ret);
 		return ret;
 	}
-
+	
 	ret = mxt_read_info_crc(data, &read_info_crc);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to read info_crc (%d)", ret);
 		goto out;
 	}
-
+	
 	ret = mxt_calculate_infoblock_crc(data, &calc_info_crc);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to calculate infoblock crc (%d)",
 			ret);
 		goto out;
 	}
-
-
+	
+	
 	if (read_info_crc != calc_info_crc) {
 		dev_err(&data->client->dev, "Infomation CRC error :"
 			"[CRC 0x%06X!=0x%06X]\n", read_info_crc, calc_info_crc);
 		ret = -EFAULT;
 		goto out;
 	}
-
+	
 	ret = mxt_load_general_config(data, IN_BOARD);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to load general config (%d)", ret);
 		return ret;
 	}
+	
+	/*initialize, config 0 */
+	for (i = 0; i < 417; i++) {
+		addr = 142+i;
+		mxt_write_mem(data, addr, 1, &dummy_buf[0]);
+	}
+	/*initialize*/
+	
 	ret = mxt_write_config(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to write config (%d)", ret);
 		return ret;
 	}
-
+	
 	ret = mxt_set_drop_bit(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to set drop bit (%d)", ret);
 		return ret;
 	}
-
+	
 	ret = mxt_load_ta_config(data, IN_BOARD);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to load ta config (%d)", ret);
 		return ret;
 	}
-
+	
 	ret = mxt_backup(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to back-up (%d)", ret);
 		return ret;
 	}
-
+	
+	msleep(100);
+	
 	ret = mxt_reset(data);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to reset (%d)", ret);
 		return ret;
 	}
-
+	
+	msleep(100);
+	
+	do {
+	/*dummy read*/
+	 mxt_read_mem(data, data->msg_proc, 3 /*size*/, dummy_buf);
+	printk("%s,dummy_buf=%d, %d %d\n", __func__, dummy_buf[0], dummy_buf[1], dummy_buf[2]);
+	msleep(5);
+	} while (dummy_buf[0] != 0xFF);
+	
 	return 0;
-
+	
 out:
 	dev_err(&client->dev, "fail to %s (%d)\n", __func__, ret);
 	return ret;
@@ -2360,25 +2380,25 @@ static int mxt_suspend(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	int i;
-
+	
 	mutex_lock(&data->lock);
-
+	
 	if (!data->enabled) {
 		dev_info(&client->dev, "%s: already disabled\n", __func__);
 		goto out;
 	}
-
+	
 	data->enabled = false;
 	disable_irq(client->irq);
-
+	
 	/* power-off*/
 	data->pdata->power_con(false);
-
+	
 	/* release all touch. the finger state check rouinte is not needed. */
 	for (i = 0; i < data->num_of_fingers; i++) {
 		int mt_val;
 		input_mt_slot(data->input_dev, i);
-
+		
 		mt_val = input_mt_get_value(&data->input_dev->
 					    mt[data->input_dev->slot],
 					    ABS_MT_TRACKING_ID);
@@ -2393,15 +2413,15 @@ static int mxt_suspend(struct device *dev)
 			data->finger[i].y = 0;
 			data->finger[i].state = 0;
 		}
-
+		
 		input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER,
 					   false);
 	}
 	input_sync(data->input_dev);
-
+	
 	*data->finger_cnt = 0;
 	data->usb_notify = FALSE;
-
+	
 out:
 	mutex_unlock(&data->lock);
 	dev_info(&client->dev, "%s\n", __func__);
@@ -2412,18 +2432,19 @@ static int mxt_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
-
+	u8 dummy_buf[3] = {0,};
+	
 	mutex_lock(&data->lock);
-
+	
 	if (data->enabled) {
 		dev_info(&client->dev, "%s: already enabled\n", __func__);
 		goto out;
 	}
-
+	
 	/* power-on*/
 	data->pdata->power_con(true);
 	msleep(100);
-
+	
 /* to do : check
 	1. TA state check and do someting
 	2. reset error conditions
@@ -2431,14 +2452,26 @@ static int mxt_resume(struct device *dev)
 */
 	data->check_after_wakeup = 1;
 	data->enabled = true;
-
+	
 	if (data->usb_notify == TRUE)
 		data->usb_notify = FALSE;
-	else if(data->usb_notify == FALSE && data->dev_mode == TA_MODE)
+	else if (data->usb_notify == FALSE && data->dev_mode == TA_MODE)
 		schedule_delayed_work(&data->wq, msecs_to_jiffies(100));
-
+	
+	if (!gpio_get_value(data->pdata->gpio_read_done)) {
+		printk("[TSP] interrupt value is low --> dummy read\n");
+		do {
+		/*dummy read*/
+		 mxt_read_mem(data, data->msg_proc, 3 /*size*/, dummy_buf);
+		printk("%s,dummy_buf=%d, %d %d\n", __func__, dummy_buf[0], dummy_buf[1], dummy_buf[2]);
+		msleep(5);
+		
+		
+		} while (dummy_buf[0] != 0xFF);
+	}
+	
 	enable_irq(client->irq);
-
+	
 out:
 	mutex_unlock(&data->lock);
 	dev_info(&client->dev, "%s\n", __func__);
@@ -2451,13 +2484,13 @@ static void mxt_early_suspend(struct early_suspend *h)
 {
 	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
 #ifdef SCREENOFF_CPUFREQ_LIMITS
-        int cpu;
+	int cpu;
 	is_suspend = true;
 	for_each_online_cpu(cpu) {
 		cpufreq_update_policy(cpu);
 	}
 #endif
-	
+
 	mxt_suspend(&data->client->dev);
 }
 
@@ -2466,7 +2499,7 @@ static void mxt_late_resume(struct early_suspend *h)
 	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
 #ifdef SCREENOFF_CPUFREQ_LIMITS
 	int cpu;
-        is_suspend = false;
+	is_suspend = false;
 	for_each_online_cpu(cpu) {
 		cpufreq_update_policy(cpu);
 	}
@@ -2484,12 +2517,12 @@ static int mxt_read_block(struct i2c_client *client, u16 addr, u16 length,
 	struct i2c_msg msg[2];
 	__le16	le_addr;
 	struct mxt_data *data;
-
+	
 	data = i2c_get_clientdata(client);
-
+	
 	if (!data)
 		return -ENXIO;
-
+	
 	if ((data->last_read_addr == addr) && (addr == data->msg_proc)) {
 		if  (i2c_master_recv(client, value, length) == length) {
 			if (data->debug_enabled)
@@ -2502,13 +2535,13 @@ static int mxt_read_block(struct i2c_client *client, u16 addr, u16 length,
 	} else {
 		data->last_read_addr = addr;
 	}
-
+	
 	le_addr = cpu_to_le16(addr);
 	msg[0].addr  = client->addr;
 	msg[0].flags = 0x00;
 	msg[0].len   = 2;
 	msg[0].buf   = (u8 *)&le_addr;
-
+	
 	msg[1].addr  = client->addr;
 	msg[1].flags = I2C_M_RD;
 	msg[1].len   = length;
@@ -2533,25 +2566,25 @@ int mxt_write_block(struct i2c_client *client, u16 addr, u16 length,
 	struct {
 		__le16	le_addr;
 		u8	data[256];
-
+		
 	} i2c_block_transfer;
-
+	
 	struct mxt_data *data;
-
+	
 	if (length > 256)
 		return -EINVAL;
-
+	
 	data = i2c_get_clientdata(client);
 	if (data != NULL)
 		data->last_read_addr = -1;
-
+	
 	for (i = 0; i < length; i++)
 		i2c_block_transfer.data[i] = *value++;
-
+	
 	i2c_block_transfer.le_addr = cpu_to_le16(addr);
-
+	
 	i = i2c_master_send(client, (u8 *)&i2c_block_transfer, length + 2);
-
+	
 	if (i == (length + 2)) {
 		if (data->debug_enabled)
 			print_hex_dump(KERN_INFO, "MXT TX:", DUMP_PREFIX_NONE,
@@ -2567,26 +2600,26 @@ static ssize_t mem_access_read(struct file *filp, struct kobject *kobj,
 	struct i2c_client *client = to_i2c_client(container_of(kobj,
 						  struct device, kobj));
 	int ret = 0;
-
+	
 	dev_info(&client->dev, "%s: p=%p, off=%lli, c=%zi\n", __func__, buf,
 		 off, count);
-
+	
 	if (off >= 32768)
 		return -EIO;
-
+	
 	if (off + count > 32768)
 		count = 32768 - off;
-
+	
 	if (count > 256)
 		count = 256;
-
+	
 	if (count > 0)	{
 		ret = mxt_read_block(client, off, count, buf);
 		if (ret < 0)
 			dev_err(&client->dev, "%s: fail to mxt_read_block (%d)"
 				"\n", __func__, ret);
 	}
-
+	
 	return ret >= 0 ? count : ret;
 }
 
@@ -2596,26 +2629,26 @@ static ssize_t mem_access_write(struct file *filp, struct kobject *kobj,
 	struct i2c_client *client = to_i2c_client(container_of(kobj,
 						  struct device, kobj));
 	int ret = 0;
-
+	
 	dev_info(&client->dev, "%s: p=%p, off=%lli, c=%zi\n", __func__, buf,
 		 off, count);
-
+	
 	if (off >= 32768)
 		return -EIO;
-
+	
 	if (off + count > 32768)
 		count = 32768 - off;
-
+	
 	if (count > 256)
 		count = 256;
-
+	
 	if (count > 0) {
 		ret = mxt_write_block(client, off, count, buf);
 		if (ret < 0)
 			dev_err(&client->dev, "%s: fail to mxt_write_block (%d)"
 				"\n", __func__, ret);
 	}
-
+	
 	return ret >= 0 ? count : 0;
 }
 
@@ -2624,15 +2657,15 @@ static ssize_t pause_show(struct device *dev, struct device_attribute *attr,
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
-
+	
 	int count = 0;
-
+	
 	count += sprintf(buf + count, "%d", data->driver_paused);
 	count += sprintf(buf + count, "\n");
-
+	
 	dev_info(&client->dev, "%s: %s\n", __func__,
 		(data->driver_paused) ? "paused" : "unpaused");
-
+	
 	return count;
 }
 
@@ -2643,24 +2676,24 @@ static ssize_t pause_store(struct device *dev, struct device_attribute *attr,
 	struct i2c_client *client = data->client;
 	int val = 0;
 	int ret;
-
+	
 	ret = sscanf(buf, "%u", &val);
 	if (ret != 1) {
 		dev_err(&client->dev, "%s: wrong size %d (%d)\n",
 			__func__, val, ret);
 		return -EINVAL;
 	}
-
+	
 	if (val < 0 || val >= 2) {
 		dev_err(&client->dev, "%s: not proper switch value %d\n",
 			__func__, val);
 		return -EINVAL;
 	}
-
+	
 	data->driver_paused = val;
 	dev_info(&client->dev, "%s: %s\n", __func__,
 		(data->driver_paused) ? "paused" : "unpaused");
-
+	
 	return count;
 }
 
@@ -2670,13 +2703,13 @@ static ssize_t debug_enable_show(struct device *dev,
 	struct mxt_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
 	int count = 0;
-
+	
 	count += sprintf(buf + count, "%d", data->debug_enabled);
 	count += sprintf(buf + count, "\n");
-
+	
 	dev_info(&client->dev, "%s: %s\n", __func__,
 		(data->debug_enabled) ? "debug enabled" : "debug disabled");
-
+	
 	return count;
 }
 
@@ -2701,11 +2734,11 @@ static ssize_t debug_enable_store(struct device *dev,
 			__func__, val);
 		return -EINVAL;
 	}
-
+	
 	data->debug_enabled = val;
 	dev_info(&client->dev, "%s: %s\n", __func__,
 		(data->debug_enabled) ? "debug enabled" : "debug disabled");
-
+	
 	return count;
 }
 
@@ -2715,9 +2748,9 @@ static ssize_t command_calibrate_store(struct device *dev,
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	int ret;
-
+	
 	ret = mxt_calibrate_chip(data);
-
+	
 	return (ret < 0) ? ret : count;
 }
 
@@ -2727,9 +2760,9 @@ static ssize_t command_reset_store(struct device *dev,
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	int ret;
-
+	
 	ret = mxt_reset(data);
-
+	
 	return (ret < 0) ? ret : count;
 }
 
@@ -2738,9 +2771,9 @@ static ssize_t command_backup_store(struct device *dev,
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	int ret;
-
+	
 	ret = mxt_backup(data);
-
+	
 	return (ret < 0) ? ret : count;
 }
 
@@ -2781,12 +2814,12 @@ static ssize_t mxt_dgb_switch_store(struct device *dev,
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
-
+	
 	data->g_debug_switch = !data->g_debug_switch;
-
+	
 	dev_info(&client->dev, "%s: debug switch is toggled (%d)\n", __func__,
 		data->g_debug_switch);
-
+	
 	return count;
 }
 
@@ -2800,18 +2833,18 @@ static ssize_t mxt_obj_store(struct device *dev,
 	unsigned int type;
 	unsigned int offset;
 	unsigned int val;
-
+	
 	sscanf(buf, "%u%u%u", &type, &offset, &val);
 	dev_info(&client->dev, "%s: write obj T%2d:%d, 0x%x\n",
 		__func__, (u8)type, (u8)offset, (u8)val);
-
+	
 	ret = mxt_write_obj(data, (u8)type, (u8)offset, (u8)val);
 	if (ret < 0) {
 		dev_err(&client->dev, "%s: fail to write obj %d:%d, 0x%x\n",
 			__func__, (u8)type, (u8)offset, (u8)val);
 		goto out;
 	}
-
+	
 	val = 0xff;
 	ret = mxt_read_obj(data, (u8)type, (u8)offset, (u8 *)&val);
 	if (ret < 0) {
@@ -2819,7 +2852,7 @@ static ssize_t mxt_obj_store(struct device *dev,
 			__func__, (u8)type, (u8)offset, (u8)val);
 		goto out;
 	}
-
+	
 	dev_info(&client->dev, "%s: write obj T%2d:%d, 0x%x\n",
 		__func__, (u8)type, (u8)offset, (u8)val);
 out:
@@ -2836,29 +2869,29 @@ static ssize_t mxt_obj_show(struct device *dev,
 	int ret;
 	unsigned int type;
 	u8 *buffer;
-
+	
 	sscanf(buf, "%u", &type);
-
+	
 	obj = mxt_get_obj(data, (u8)type);
 	if (!obj) {
 		dev_err(&client->dev, "%s: T%d is invalid obj type\n",
 			__func__, (u8)type);
 		goto out;
 	}
-
+	
 	buffer = kzalloc(obj->size, GFP_KERNEL);
 	if (!buffer) {
 		dev_err(&client->dev, "%s: fail to alloc buffer\n", __func__);
 		goto out;
 	}
-
+	
 	ret = mxt_read_mem(data, obj->start_addr, obj->size, buffer);
 	if (ret < 0) {
 		dev_err(&client->dev, "%s: fail to read T%d (%d)\n",
 			__func__, (u8)type, ret);
 		goto out;
 	}
-
+	
 	dev_info(&client->dev, "%s: obj T%d is\n", __func__, (u8)type);
 	print_hex_dump(KERN_INFO, "mxt obj:", DUMP_PREFIX_OFFSET, 16, 1, buffer,
 			obj->size, false);
@@ -2907,34 +2940,34 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *devattr,
 	bool cmd_found = false;
 	int ret;
 	int param_cnt = 0;
-
+	
 	if (fdata->cmd_is_running == true) {
 		dev_err(&client->dev, "%s: other cmd is running.\n", __func__);
 		goto err_out;
 	}
-
+	
 	/* check lock  */
 	mutex_lock(&fdata->cmd_lock);
 	fdata->cmd_is_running = true;
 	mutex_unlock(&fdata->cmd_lock);
-
+	
 	fdata->cmd_state = RUNNING;
-
+	
 	for (i = 0; i < ARRAY_SIZE(fdata->cmd_param); i++)
 		fdata->cmd_param[i] = 0;
-
+	
 	len = (int)count;
 	if (*(buf + len - 1) == '\n')
 		len--;
 	memset(fdata->cmd, 0x00, ARRAY_SIZE(fdata->cmd));
 	memcpy(fdata->cmd, buf, len);
-
+	
 	cur = strchr(buf, (int)delim);
 	if (cur)
 		memcpy(buff, buf, cur - buf);
 	else
 		memcpy(buff, buf, len);
-
+	
 	/* find command */
 	list_for_each_entry(tsp_cmd_ptr, &fdata->cmd_list_head, list) {
 		if (!strcmp(buff, tsp_cmd_ptr->cmd_name)) {
@@ -2942,7 +2975,7 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *devattr,
 			break;
 		}
 	}
-
+	
 	/* set not_support_cmd */
 	if (!cmd_found) {
 		list_for_each_entry(tsp_cmd_ptr, &fdata->cmd_list_head, list) {
@@ -2950,7 +2983,7 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *devattr,
 				break;
 		}
 	}
-
+	
 	/* parsing TSP standard tset parameter */
 	if (cur && cmd_found) {
 		cur++;
@@ -2961,7 +2994,7 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *devattr,
 				memset(buff, 0x00, ARRAY_SIZE(buff));
 				memcpy(buff, start, end - start);
 				*(buff + strlen(buff)) = '\0';
-
+				
 				ret = kstrtoint(buff, 10,
 						&fdata->cmd_param[param_cnt]);
 				if (ret < 0) {
@@ -2977,15 +3010,15 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *devattr,
 			cur++;
 		} while (cur - buf <= len);
 	}
-
+	
 	dev_info(&client->dev, "%s: cmd = %s\n", __func__,
 		 tsp_cmd_ptr->cmd_name);
 	for (i = 0; i < param_cnt; i++)
 		dev_info(&client->dev, "cmd param %d= %d\n", i,
 							fdata->cmd_param[i]);
-
+		
 	tsp_cmd_ptr->cmd_func(data);
-
+	
 err_out:
 	return count;
 }
@@ -2997,10 +3030,10 @@ static ssize_t cmd_status_show(struct device *dev,
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	char buff[16];
-
+	
 	dev_info(&client->dev, "%s: check status:%d\n", __func__,
 							fdata->cmd_state);
-
+	
 	switch (fdata->cmd_state) {
 	case WAITING:
 		sprintf(buff, "%s", TOSTRING(WAITING));
@@ -3021,7 +3054,7 @@ static ssize_t cmd_status_show(struct device *dev,
 		sprintf(buff, "%s", TOSTRING(NOT_APPLICABLE));
 		break;
 	}
-
+	
 	return sprintf(buf, "%s\n", buff);
 }
 
@@ -3031,16 +3064,16 @@ static ssize_t cmd_result_show(struct device *dev,
 	struct mxt_data *data = dev_get_drvdata(dev);
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"(%d)\n", __func__,
 				fdata->cmd_result, strlen(fdata->cmd_result));
-
+	
 	mutex_lock(&fdata->cmd_lock);
 	fdata->cmd_is_running = false;
 	mutex_unlock(&fdata->cmd_lock);
-
+	
 	fdata->cmd_state = WAITING;
-
+	
 	return sprintf(buf, "%s", fdata->cmd_result);
 }
 
@@ -3048,7 +3081,7 @@ static void set_default_result(struct mxt_data *data)
 {
 	struct sec_fac_tsp *fdata = data->fdata;
 	char delim = ':';
-
+	
 	memset(fdata->cmd_result, 0x00, ARRAY_SIZE(fdata->cmd_result));
 	memset(fdata->cmd_buff, 0x00, ARRAY_SIZE(fdata->cmd_buff));
 	memcpy(fdata->cmd_result, fdata->cmd, strlen(fdata->cmd));
@@ -3061,9 +3094,9 @@ static void not_support_cmd(void *device_data)
 	struct mxt_data *data = (struct  mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	sprintf(fdata->cmd_buff, "%s", "NA");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = NOT_APPLICABLE;
@@ -3078,14 +3111,14 @@ static void fw_update(void *device_data)
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	set_default_result(data);
-
+	
 	if (!data->enabled) {
 		dev_err(&client->dev, "%s: device is not enabled\n", __func__);
 		goto err;
 	}
-
+	
 	disable_irq(client->irq);
 	ret = mxt_initialize(data, false);
 	enable_irq(client->irq);
@@ -3093,19 +3126,19 @@ static void fw_update(void *device_data)
 		dev_err(&client->dev, "%s: fail to upate\n", __func__);
 		goto err;
 	}
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
-
+	
 	fdata->cmd_state = OK;
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3114,27 +3147,27 @@ static void get_fw_ver_bin(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	if (!fw_latest[0]) {
 		dev_err(&client->dev, "no readed fw ver\n");
 		goto err;
 	}
-
-	sprintf(fdata->cmd_buff, "%#X", fw_latest[0]);
+	
+	sprintf(fdata->cmd_buff, "AT00%04x", fw_latest[0]);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
-
+	
 	fdata->cmd_state = OK;
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3145,33 +3178,34 @@ static void get_fw_ver_ic(void *device_data)
 	struct i2c_client *client = data->client;
 	int ret;
 	u8 buf;
-
+	
 	set_default_result(data);
-
+	
 	if (!data->enabled) {
 		dev_err(&client->dev, "%s: device is not enabled\n", __func__);
 		goto err;
 	}
-
+	
 	ret = mxt_read_mem(data, 0X02, sizeof(u8), (u8 *)&buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to read fw ver of IC (%d)\n", ret);
 		goto err;
 	}
-
-	sprintf(fdata->cmd_buff, "%#X", buf);
+	
+	/*sprintf(fdata->cmd_buff, "%#X", buf);*/
+	sprintf(fdata->cmd_buff, "AT00%04x", buf);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3180,28 +3214,28 @@ static void get_config_ver(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	if (!data->enabled) {
 		dev_err(&client->dev, "%s: device is not enabled\n", __func__);
 		goto err;
 	}
-
+	
 	sprintf(fdata->cmd_buff, "%s", data->pdata->config_ver);
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3212,33 +3246,33 @@ static void get_threshold(void *device_data)
 	struct i2c_client *client = data->client;
 	int ret;
 	u8 buf;
-
+	
 	set_default_result(data);
-
+	
 	if (!data->enabled) {
 		dev_err(&client->dev, "%s: device is not enabled\n", __func__);
 		goto err;
 	}
-
+	
 	ret = mxt_read_obj(data, TOUCH_MULTITOUCHSCREEN_T9, 7, &buf);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to read threshold (%d)\n", ret);
 		goto err;
 	}
-
+	
 	sprintf(fdata->cmd_buff, "%d", buf);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3247,19 +3281,19 @@ static void module_off_master(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	mutex_lock(&data->lock);
 	data->enabled = false;
 	disable_irq(client->irq);
 	data->pdata->power_con(false);
 	mutex_unlock(&data->lock);
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3268,19 +3302,19 @@ static void module_on_master(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	mutex_lock(&data->lock);
 	data->pdata->power_con(true);
 	data->enabled = true;
 	enable_irq(client->irq);
 	mutex_unlock(&data->lock);
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3289,15 +3323,15 @@ static void get_chip_vendor(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	sprintf(fdata->cmd_buff, "%s", "ATMEL");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3306,15 +3340,15 @@ static void get_chip_name(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	sprintf(fdata->cmd_buff, "%s", "MXT224S");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3323,15 +3357,15 @@ static void get_x_num(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	sprintf(fdata->cmd_buff, "%d", data->fdata->num_of_x);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3340,15 +3374,15 @@ static void get_y_num(void *device_data)
 	struct mxt_data *data = (struct mxt_data *)device_data;
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
-
+	
 	set_default_result(data);
-
+	
 	sprintf(fdata->cmd_buff, "%d", data->fdata->num_of_y);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3356,7 +3390,7 @@ static int mxt_set_diagnostic_mode(struct mxt_data *data, u8 mode)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	ret = mxt_write_obj(data, GEN_COMMANDPROCESSOR_T6,
 			    CMD_DIAGNOSTIC_OFFSET, mode);
 	if (ret < 0) {
@@ -3364,7 +3398,7 @@ static int mxt_set_diagnostic_mode(struct mxt_data *data, u8 mode)
 			"(%d)\n", __func__, mode, ret);
 		goto err;
 	}
-
+	
 	/* confirm mode */
 	if (mode & MXT_DIAG_MODE_MASK) {
 		u8 mode_backup = mode;
@@ -3384,12 +3418,12 @@ static int mxt_set_diagnostic_mode(struct mxt_data *data, u8 mode)
 				ret = -EAGAIN;
 				goto err;
 			}
-
+			
 		} while (mode != mode_backup);
 		dev_info(&client->dev, "current dianostic mode is %#x\n",
 			 mode);
 	}
-
+	
 	return 0;
 err:
 	return ret;
@@ -3406,7 +3440,7 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 	int i;
 	int ret;
 	int offset;
-
+	
 	switch (mode) {
 	case MXT_DIAG_REFERENCE_MODE:
 		offset = -REFERENCE_OFFSET;
@@ -3420,16 +3454,16 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 		dev_err(&client->dev, "%s: invalid mode %#x\n", __func__, mode);
 		return -EINVAL;
 	}
-
+	
 	buf_size = ((int)(fdata->num_of_x * data->info.matrix_ysize /
 		   MXT_NODE_PER_PAGE) + 1) * MXT_PAGE_SIZE;
-
+		   
 	buf = kzalloc(buf_size, GFP_KERNEL);
 	if (!buf) {
 		dev_err(&client->dev, "%s: fail to alloc buf\n", __func__);
 		return -ENOMEM;
 	}
-
+	
 	/* to make the Page Num to 0 */
 	ret = mxt_set_diagnostic_mode(data, MXT_DIAG_CTE_MODE);
 	if (ret < 0) {
@@ -3444,7 +3478,7 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 			__func__, mode, ret);
 		goto out;
 	}
-
+	
 	/* get object info for diagnostic */
 	obj = mxt_get_obj(data, DEBUG_DIAGNOSTIC_T37);
 	if (!obj) {
@@ -3452,24 +3486,24 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 		ret = -EINVAL;
 		goto out;
 	}
-
+	
 	/* initialize min, max value */
 	max = 0x1 << (sizeof(int) * 8 - 1);
 	min = ~max;
-
+	
 	/* read raw data*/
 	for (i = 0; i < buf_size / MXT_PAGE_SIZE; i++) {
 		u8 page;
 		int next_page = i + 1;
 		int cnt = 30;
 		u8 *__buf = (u8 *)buf;
-
+		
 		ret = mxt_read_mem(data, obj->start_addr + MXT_DIAG_DATA,
 				   MXT_PAGE_SIZE, __buf + MXT_PAGE_SIZE * i);
-
+		
 		if (next_page == buf_size / MXT_PAGE_SIZE)
 			break;
-
+		
 		/* page up */
 		ret = mxt_set_diagnostic_mode(data, MXT_DIAG_PAGE_UP);
 		if (ret < 0) {
@@ -3485,29 +3519,29 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 					"page (%d)\n", __func__, ret);
 				goto out;
 			}
-
+			
 			if (cnt-- < 0) {
 				dev_err(&client->dev, "%s: fail to page up "
 					"cnt underflow\n", __func__);
 				ret = -EAGAIN;
 				goto out;
 			}
-
+			
 			usleep_range(1000, 1100);
-
+			
 		} while (page != next_page);
 	}
-
+	
 	for (i = 0; i < buf_size / MXT_BYTE_PER_NODE; i++) {
 		int x, y, src_idx, dest_idx;
 		x = i / data->info.matrix_ysize;
 		y = i % data->info.matrix_ysize;
 		src_idx = x * data->info.matrix_ysize + y;
 		dest_idx = x * fdata->num_of_y + y;
-
+		
 		if (y >= fdata->num_of_y ||  x >= fdata->num_of_x)
 			continue;
-
+		
 		/*
 		 * to do : if dual-X is enabled, reference data of bottom
 			   tx line must be doubled. But now the dual-X is not
@@ -3515,11 +3549,11 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 		 */
 		buf[src_idx] += offset;
 		raw_data_buf[dest_idx] = buf[src_idx];
-
+		
 		max = (max < (s16)buf[src_idx]) ? (s16)buf[src_idx] : max;
 		min = (min > (s16)buf[src_idx]) ? (s16)buf[src_idx] : min;
 	}
-
+	
 	switch (mode) {
 	case MXT_DIAG_REFERENCE_MODE:
 		fdata->reference_min = min;
@@ -3530,7 +3564,7 @@ static int mxt_read_all_diagnostic_data(struct mxt_data *data, u8 mode)
 		fdata->delta_max = max;
 		break;
 	}
-
+	
 	ret = 0;
 out:
 	kfree(buf);
@@ -3543,9 +3577,9 @@ static void run_reference_read(void *device_data)
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	set_default_result(data);
-
+	
 	/* enter mode */
 	ret = mxt_read_all_diagnostic_data(data, MXT_DIAG_REFERENCE_MODE);
 	if (ret < 0) {
@@ -3553,22 +3587,22 @@ static void run_reference_read(void *device_data)
 			 __func__, ret);
 		goto err;
 	}
-
+	
 	sprintf(fdata->cmd_buff, "%d, %d", fdata->reference_min,
 		fdata->reference_max);
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3578,19 +3612,19 @@ static void get_reference(void *device_data)
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	int val;
-
+	
 	set_default_result(data);
-
-
+	
+	
 	val = fdata->reference[fdata->cmd_param[0] * fdata->num_of_y +
 			       fdata->cmd_param[1]];
-
+			       
 	sprintf(fdata->cmd_buff, "%d", val);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3600,9 +3634,9 @@ static void run_delta_read(void *device_data)
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 	set_default_result(data);
-
+	
 	/* enter mode */
 	ret = mxt_read_all_diagnostic_data(data, MXT_DIAG_DELTA_MODE);
 	if (ret < 0) {
@@ -3610,22 +3644,22 @@ static void run_delta_read(void *device_data)
 			 __func__, ret);
 		goto err;
 	}
-
+	
 	sprintf(fdata->cmd_buff, "%d, %d", fdata->delta_min,
 		fdata->delta_max);
-
+	
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
-
+	
 err:
 	sprintf(fdata->cmd_buff, "%s", "NG");
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = FAIL;
-
+	
 	return ;
 }
 
@@ -3635,18 +3669,18 @@ static void get_delta(void *device_data)
 	struct sec_fac_tsp *fdata = data->fdata;
 	struct i2c_client *client = data->client;
 	int val;
-
+	
 	set_default_result(data);
-
+	
 	val = fdata->delta[fdata->cmd_param[0] * fdata->num_of_y +
 			   fdata->cmd_param[1]];
-
+			   
 	sprintf(fdata->cmd_buff, "%d", val);
 	set_cmd_result(data, fdata->cmd_buff, strlen(fdata->cmd_buff));
 	fdata->cmd_state = OK;
-
+	
 	dev_info(&client->dev, "%s: \"%s\"\n", __func__, fdata->cmd_buff);
-
+	
 	return;
 }
 
@@ -3656,13 +3690,13 @@ static int mxt_sec_fac_init(struct mxt_data *data)
 	struct sec_fac_tsp *fdata;
 	int ret;
 	int i;
-
+	
 	fdata = kzalloc(sizeof(struct sec_fac_tsp), GFP_KERNEL);
 	if (!fdata) {
 		dev_err(&client->dev, "fail to alloc fdata\n");
 		return -ENOMEM;
 	}
-
+	
 	ret = mxt_read_obj(data, TOUCH_MULTITOUCHSCREEN_T9, 3,
 			   &fdata->num_of_x);
 	if (ret < 0) {
@@ -3670,7 +3704,7 @@ static int mxt_sec_fac_init(struct mxt_data *data)
 			__func__, ret);
 		goto err_get_num_of_x;
 	}
-
+	
 	ret = mxt_read_obj(data, TOUCH_MULTITOUCHSCREEN_T9, 4,
 			   &fdata->num_of_y);
 	if (ret < 0) {
@@ -3678,13 +3712,13 @@ static int mxt_sec_fac_init(struct mxt_data *data)
 			__func__, ret);
 		goto err_get_num_of_y;
 	}
-
+	
 	fdata->num_of_node = fdata->num_of_x * fdata->num_of_y;
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 	dev_info(&client->dev, "%s: x=%d, y=%d, total=%d\n", __func__,
 		fdata->num_of_x, fdata->num_of_y, fdata->num_of_node);
 #endif
-
+	
 	fdata->reference = kzalloc(fdata->num_of_node * sizeof(u16),
 				   GFP_KERNEL);
 	if (!fdata->reference) {
@@ -3692,25 +3726,25 @@ static int mxt_sec_fac_init(struct mxt_data *data)
 		ret = -ENOMEM;
 		goto err_alloc_reference;
 	}
-
+	
 	fdata->delta = kzalloc(fdata->num_of_node * sizeof(u16), GFP_KERNEL);
 	if (!fdata->delta) {
 		dev_err(&client->dev, "fail to alloc delta of fdata\n");
 		ret = -ENOMEM;
 		goto err_alloc_delta;
 	}
-
+	
 	mutex_init(&fdata->cmd_lock);
 	fdata->cmd_is_running = false;
-
+	
 	INIT_LIST_HEAD(&fdata->cmd_list_head);
 	for (i = 0; i < ARRAY_SIZE(tsp_cmds); i++)
 		list_add_tail(&tsp_cmds[i].list, &fdata->cmd_list_head);
-
+	
 	data->fdata = fdata;
-
+	
 	return 0;
-
+	
 err_alloc_delta:
 	kfree(fdata->reference);
 err_get_num_of_y:
@@ -3723,7 +3757,7 @@ err_alloc_reference:
 static void destroy_sec_fac(struct mxt_data *data)
 {
 	struct sec_fac_tsp *fdata = data->fdata;
-
+	
 	kfree(fdata->delta);
 	kfree(fdata->reference);
 	kfree(fdata);
@@ -3749,7 +3783,7 @@ static int mxt_init_interface(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int ret;
-
+	
 #if defined(ATMEL_DEBUG)
 	ret = sysfs_create_group(&client->dev.kobj, &libmaxtouch_attr_group);
 	if (ret) {
@@ -3757,14 +3791,14 @@ static int mxt_init_interface(struct mxt_data *data)
 			"failed to create libmaxtouch sysfs group (%d)\n", ret);
 		return (ret < 0) ? ret : -ret;
 	}
-
+	
 	sysfs_bin_attr_init(&mem_access_attr);
 	mem_access_attr.attr.name = "mem_access";
 	mem_access_attr.attr.mode = S_IRUGO | S_IWUGO;
 	mem_access_attr.read = mem_access_read;
 	mem_access_attr.write = mem_access_write;
 	mem_access_attr.size = 65535;
-
+	
 	ret = sysfs_create_bin_file(&client->dev.kobj, &mem_access_attr);
 	if (ret < 0) {
 		dev_err(&client->dev, "failed to create device file (%s)\n",
@@ -3792,7 +3826,7 @@ static int mxt_init_interface(struct mxt_data *data)
 		data->fdata->dummy_dev = NULL;
 		goto err_create_sec_class_dev;
 	}
-
+	
 	ret = sysfs_create_group(&data->fdata->dummy_dev->kobj,
 				 &fac_attr_group);
 	if (ret) {
@@ -3804,7 +3838,7 @@ static int mxt_init_interface(struct mxt_data *data)
 #endif
 
 	return 0;
-
+	
 #if defined(SEC_FAC_TSP)
 	sysfs_remove_group(&data->fdata->dummy_dev->kobj, &fac_attr_group);
 err_create_fac_attr_group:
@@ -3826,8 +3860,7 @@ err_create_mem_access:
 static void mxt_check_default_ta_status(unsigned long __data)
 {
 	struct mxt_data *data = (struct mxt_data *)__data;
-
-
+	
 	dev_err(&data->client->dev, "initial_cable_status=0x%x\n",
 		*data->pdata->initial_cable_status);
 	if (*data->pdata->initial_cable_status != 0) {
@@ -3835,6 +3868,60 @@ static void mxt_check_default_ta_status(unsigned long __data)
 		schedule_delayed_work(&data->wq, msecs_to_jiffies(100));
 	}
 }
+
+
+#if defined(SEC_FAC_TSP)
+
+static ssize_t fac_read_firm_version_phone(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	int ret;
+	
+	ret = sprintf(buf, "AT00%04x", fw_latest[0]);
+	
+	return ret;
+}
+
+static ssize_t fac_read_firm_version_panel(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	int ret;
+	u8 read_buf;
+	
+	set_default_result(data);
+	
+	ret = mxt_read_mem(data, 0X02, sizeof(u8), (u8 *)&read_buf);
+	if (ret < 0) {
+		dev_err(&client->dev, "fail to read fw ver of IC (%d)\n", ret);
+	}
+	ret = sprintf(buf, "AT00%04x", fw_latest[0]); /* temp */
+	
+/*	ret = sprintf(buf, "AT00%04x", read_buf); */
+
+	return ret;
+}
+
+
+
+static DEVICE_ATTR(tsp_firm_version_phone, S_IRUGO, fac_read_firm_version_phone, NULL);
+static DEVICE_ATTR(tsp_firm_version_panel, S_IRUGO, fac_read_firm_version_panel, NULL);
+
+
+static struct attribute *fac_tsp_attributes[] = {
+	&dev_attr_tsp_firm_version_phone.attr,
+	&dev_attr_tsp_firm_version_panel.attr,
+	NULL,
+};
+
+static struct attribute_group fac_tsp_attr_group = {
+	.attrs = fac_tsp_attributes,
+};
+
+#endif
+
 
 static int __devinit mxt_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
@@ -3850,17 +3937,17 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		dev_err(&client->dev, "module is off.(%d)\n", lcd_type);
 		return -ENODEV;
 	}
-*/	
+*/
 	if (!pdata) {
 		dev_err(&client->dev, "missing platform data\n");
 		return -EINVAL;
 	}
-
+	
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "not compatible i2c function\n");
 		return -ENODEV;
 	}
-
+	
 	data = kzalloc(sizeof(struct mxt_data) +
 			pdata->num_of_fingers * sizeof(struct mxt_finger_info),
 			GFP_KERNEL);
@@ -3868,7 +3955,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		dev_err(&client->dev, "fail to alloc device data\n");
 		return -ENOMEM;
 	}
-
+	
 	data->pdata = pdata;
 	if (data->pdata->exit_flag) {
 		dev_err(&client->dev, "exit flag is setted(%d)\n",
@@ -3876,26 +3963,26 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		ret = -ENODEV;
 		goto exit_flag_set;
 	}
-
+	
 	input_dev = input_allocate_device();
 	if (!input_dev) {
 		dev_err(&client->dev, "input device allocation failed\n");
 		ret = -ENOMEM;
 		goto err_alloc_input_dev;
 	}
-
+	
 	data->client = client;
 	data->input_dev = input_dev;
 	
 	data->num_of_fingers = pdata->num_of_fingers;
 	data->finger_cnt = pdata->touchscreen_is_pressed;
-
+	
 	input_dev->name = "sec_touchscreen";
 	input_dev->id.bustype = BUS_I2C;
-
+	
 	input_dev->dev.parent = &client->dev;
-
-
+	
+	
 	set_bit(EV_ABS, input_dev->evbit);
 	set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
 	input_mt_init_slots(input_dev, data->num_of_fingers);
@@ -3911,7 +3998,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	input_set_abs_params(input_dev, ABS_MT_COMPONENT, 0, 255, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_SUMSIZE, 0, 11 * 19, 0, 0);
 #endif
-
+	
 	input_set_drvdata(input_dev, data);
 	/* regist input device */
 	ret = input_register_device(input_dev);
@@ -3920,9 +4007,9 @@ static int __devinit mxt_probe(struct i2c_client *client,
 			ret);
 		goto err_reg_input_dev;
 	}
-
+	
 	i2c_set_clientdata(client, data);
-
+	
 	/* regist dummy device for boot_address */
 	if (data->pdata->boot_address) {
 		boot_address = data->pdata->boot_address;
@@ -3939,9 +4026,9 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		ret = -ENOMEM;
 		goto err_get_dummy_client;
 	}
-
+	
 	mutex_init(&data->lock);
-
+	
 	ret = data->pdata->setup_power(&client->dev, true);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to setup power(%d)\n", ret);
@@ -3949,7 +4036,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	}
 	data->pdata->power_con(true);
 	msleep(100);
-
+	
 #if defined(TOUCH_BOOSTER)
 	prcmu_qos_add_requirement(PRCMU_QOS_APE_OPP, (char *)client->name,
 				  PRCMU_QOS_DEFAULT_VALUE);
@@ -3959,7 +4046,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 				  PRCMU_QOS_DEFAULT_VALUE);
 	dev_info(&client->dev, "add_prcmu_qos is added\n");
 #endif
-
+	
 	ret = request_threaded_irq(client->irq, NULL, mxt_irq_thread,
 		IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "mxt_ts", data);
 	if (ret < 0) {
@@ -3967,40 +4054,40 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		goto err_request_irq;
 	}
 	disable_irq(client->irq);
-
+	
 	ret = mxt_initialize(data, true);
 	if (ret < 0) {
 		dev_err(&client->dev, "fail to initialzie IC (%d)\n", ret);
 		goto err_initialize;
 	}
-
+	
 	enable_irq(client->irq);
-
+	
 	data->enabled = true;
-
+	
 	data->dev_mode = NORMAL_MODE;
 	INIT_DELAYED_WORK(&data->wq, mxt_mode_transit_worker);
-
+	
 #ifdef CONFIG_USB_SWITCHER
 	data->nb.notifier_call = mxt_usb_switch_notify;
-
+	
 	if (use_ab8505_iddet)
 		micro_usb_register_usb_notifier(&data->nb);
 	else
 		usb_switch_register_notify(&data->nb);
 #endif
-
+	
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	data->early_suspend.suspend = mxt_early_suspend;
 	data->early_suspend.resume = mxt_late_resume;
 	register_early_suspend(&data->early_suspend);
 #endif
-
+	
 #if defined(MXT_DEBUG)
 	data->g_debug_switch = false;
 #endif
-
+	
 #if defined(SEC_FAC_TSP)
 	ret = mxt_sec_fac_init(data);
 	if (ret < 0) {
@@ -4013,12 +4100,27 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		dev_err(&client->dev, "fail to init interface (%d)\n", ret);
 		goto err_init_interface;
 	}
+	
+	init_timer(&(data->ta_status_timer));
+	data->ta_status_timer.expires = get_jiffies_64() + msecs_to_jiffies(5 * MSEC_PER_SEC);
+	data->ta_status_timer.data = (unsigned long) data;
+	data->ta_status_timer.function = mxt_check_default_ta_status;
+	add_timer(&(data->ta_status_timer));
+	
+#if defined(SEC_FAC_TSP)
+	
+	sec_touchscreen_dev	= device_create(sec_class, NULL, 0, data, "sec_touchscreen");
+	if (IS_ERR(sec_touchscreen_dev)) {
+		dev_err(&client->dev, "Failed to create fac tsp temp dev\n");
+	}
+	
+	ret = sysfs_create_group(&sec_touchscreen_dev->kobj, &fac_tsp_attr_group);
+	if (ret)
+		dev_err(&client->dev, "%s: failed to create fac_tsp_attr_group (%d)\n", __func__, ret);
 
-        init_timer(&(data->ta_status_timer));
-        data->ta_status_timer.expires = get_jiffies_64() + msecs_to_jiffies(5 * MSEC_PER_SEC);
-        data->ta_status_timer.data = (unsigned long) data;
-        data->ta_status_timer.function = mxt_check_default_ta_status;
-        add_timer(&(data->ta_status_timer));
+#endif
+
+
 
 	dev_info(&client->dev, "successfully probed.\n");
 
@@ -4033,10 +4135,7 @@ err_initialize:
 	mxt_uninitialize(data);
 	free_irq(client->irq, data);
 err_request_irq:
-	prcmu_qos_remove_requirement(PRCMU_QOS_APE_OPP, (char *)client->name);
-	prcmu_qos_remove_requirement(PRCMU_QOS_DDR_OPP, (char *)client->name);
-	prcmu_qos_remove_requirement(PRCMU_QOS_ARM_KHZ, (char *)client->name);
-	data->pdata->setup_power(&client->dev, false);
+/*	data->pdata->setup_power(&client->dev, false);*/
 err_setup_power:
 	i2c_unregister_device(data->client_boot);
 err_get_dummy_client:
@@ -4053,7 +4152,7 @@ exit_flag_set:
 static int __devexit mxt_remove(struct i2c_client *client)
 {
 	struct mxt_data *data = i2c_get_clientdata(client);
-
+	
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&data->early_suspend);
 #endif
@@ -4067,7 +4166,7 @@ static int __devexit mxt_remove(struct i2c_client *client)
 	destroy_sec_fac(data);
 #endif
 	kfree(data);
-
+	
 	return 0;
 }
 
